@@ -4,16 +4,16 @@ import numpy as np
 import os
 from datetime import datetime
 import streamlit.components.v1 as components
-import yfinance as yf
 
-# --- ERROR FIX: MT5 Cloud Compatibility Check ---
+# --- STEP 1: SMART IMPORT (Cloud vs Desktop) ---
+# Ye block check karega ki MetaTrader5 install hai ya nahi
 try:
     import MetaTrader5 as mt5
     MT5_AVAILABLE = True
 except ImportError:
     MT5_AVAILABLE = False
 
-# --- 1. BRANDING & MOBILE-READY UI ---
+# --- STEP 2: UI & BRANDING ---
 st.set_page_config(page_title="The Global Trading Book", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -26,14 +26,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. EXECUTION ENGINE (With Safety Check) ---
+# --- STEP 3: EXECUTION LOGIC ---
 def place_tgtb_order(symbol, lot, side, order_type, price=None):
     if not MT5_AVAILABLE:
-        st.error("❌ Direct Trading feature is only available on Windows Desktop with MT5 installed.")
+        st.error("❌ Direct Trading (MT5) sirf Windows Desktop par kaam karega.")
         return None
     
-    if not mt5.initialize(): 
-        st.error("❌ MT5 Initialization Failed. Please open your MT5 Terminal.")
+    if not mt5.initialize():
+        st.error("❌ MT5 Terminal nahi mil raha. Ise open karein.")
         return None
         
     order_dict = {
@@ -42,10 +42,9 @@ def place_tgtb_order(symbol, lot, side, order_type, price=None):
         "Stop": mt5.ORDER_TYPE_BUY_STOP if side == "BUY" else mt5.ORDER_TYPE_SELL_STOP
     }
     
-    # Get Price
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
-        st.error(f"❌ Symbol {symbol} not found in MT5.")
+        st.error(f"❌ Symbol {symbol} nahi mila.")
         return None
         
     p = price if order_type != "Market" else (tick.ask if side == "BUY" else tick.bid)
@@ -57,73 +56,69 @@ def place_tgtb_order(symbol, lot, side, order_type, price=None):
     }
     return mt5.order_send(request)
 
-# --- 3. DATABASE SETUP ---
+# --- STEP 4: DATABASE ---
 DATA_FILE = "global_trading_book_data.csv"
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["Date", "Symbol", "Side", "Type", "Price", "Qty", "PnL", "Mood", "Notes"]).to_csv(DATA_FILE, index=False)
 
-# --- 4. MAIN TERMINAL ---
+# --- STEP 5: MAIN APP ---
 st.markdown("<h1>📔 THE GLOBAL TRADING BOOK</h1>", unsafe_allow_html=True)
 
-# Sidebar
+# Sidebar Control
 with st.sidebar:
-    st.header("⚙️ Station Control")
+    st.header("⚙️ Status")
     if MT5_AVAILABLE:
-        if st.button("🔗 Connect Broker (MT5)"):
-            if mt5.initialize(): st.success("Broker Connected! 🟢")
-            else: st.error("MT5 Terminal not running.")
+        st.success("Desktop Mode: MT5 Ready 🟢")
+        if st.button("Connect MT5"):
+            mt5.initialize()
     else:
-        st.info("ℹ️ Running in Cloud Mode (Journaling Only)")
+        st.info("Cloud Mode: Journaling Active 📲")
     daily_limit = st.number_input("Daily Loss Limit ($)", value=500.0)
 
 df = pd.read_csv(DATA_FILE)
 
-# --- 5. TABS ---
+# Tabs
 tabs = st.tabs(["⚡ TRADE", "📈 STATS", "🧠 REVIEW", "🚨 EMERGENCY"])
 
-with tabs[0]: # TRADE & CHART
+with tabs[0]: # TRADE TAB
     col_chart, col_form = st.columns([2, 1])
     with col_chart:
-        sym = st.text_input("Symbol (e.g., XAUUSD)", value="XAUUSD").upper()
+        sym = st.text_input("Symbol", value="XAUUSD").upper()
         chart_html = f'<div style="height:450px;"><div id="tv"></div><script src="https://s3.tradingview.com/tv.js"></script><script>new TradingView.widget({{"autosize":true,"symbol":"{sym}","interval":"15","theme":"dark","style":"1","container_id":"tv"}});</script></div>'
         components.html(chart_html, height=450)
     
     with col_form:
-        st.subheader("Order Entry")
+        st.subheader("New Entry")
         with st.form("trade_form", clear_on_submit=True):
             ot = st.selectbox("Order Type", ["Market", "Limit", "Stop"])
             sd = st.radio("Side", ["BUY", "SELL"], horizontal=True)
-            lt = st.number_input("Lots", value=0.01, step=0.01, format="%.2f")
-            pr = st.number_input("Price (Limit/Stop)", format="%.5f") if ot != "Market" else 0.0
+            lt = st.number_input("Lots", value=0.01, step=0.01)
+            pr = st.number_input("Price", format="%.5f") if ot != "Market" else 0.0
             md = st.selectbox("Psychology", ["Disciplined", "FOMO", "Impulsive", "Revenge"])
             nt = st.text_input("Notes")
             
-            if st.form_submit_button("PLACE & LOG TRADE"):
-                # If MT5 is available, try direct trade
+            if st.form_submit_button("PLACE & LOG"):
+                exec_price = pr
                 if MT5_AVAILABLE:
                     res = place_tgtb_order(sym, lt, sd, ot, pr)
                     if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                        st.success("Trade Executed & Logged!")
+                        st.success("Trade Executed!")
                         exec_price = res.price
-                    else:
-                        st.warning("Execution Failed, Logging manually...")
-                        exec_price = pr
-                else:
-                    st.info("Cloud Mode: Trade Logged Locally.")
-                    exec_price = pr
                 
-                # Always log to CSV
+                # Log to CSV
                 new_trade = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, sd, ot, exec_price, lt, 0, md, nt]
                 pd.DataFrame([new_trade]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+                st.rerun()
 
-with tabs[1]: # STATS
+with tabs[1]: # STATS TAB
     if not df.empty:
         st.metric("Total P&L", f"${df['PnL'].sum():,.2f}")
         st.line_chart(df['PnL'].cumsum())
-        
 
-with tabs[2]: # REVIEW
-    st.subheader("🧠 Weekly Psychology Audit")
-    if not df.empty:
-        mood_data = df.groupby('Mood')['PnL'].sum()
-        st.bar_chart(mood_data)
+with tabs[3]: # EMERGENCY TAB
+    st.header("🛑 Kill Switch")
+    if st.button("CLOSE ALL POSITIONS"):
+        if MT5_AVAILABLE:
+            st.warning("Closing all trades...")
+        else:
+            st.error("Desktop connectivity required for Kill Switch.")
