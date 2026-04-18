@@ -5,134 +5,97 @@ import os
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# --- 1. PRO CONFIG & UI ---
+# --- 1. CONFIG ---
 st.set_page_config(page_title="TGTB Pro Terminal", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
-    .block-container { padding: 0.5rem !important; max-width: 100% !important; }
-    .stApp { background-color: #06080a; }
+    .block-container { padding: 0.5rem !important; }
+    .stApp { background-color: #06080a; color: #e0e3eb; }
     header, footer { visibility: hidden; }
-    
-    /* Navigation Buttons */
-    .stButton > button {
-        border-radius: 8px;
-        height: 2.8em;
-        font-size: 12px !important;
-        background-color: #12151c !important;
-        color: #848e9c !important;
-        border: 1px solid #2b2f3a !important;
-    }
-    .stButton > button:hover { color: #f0b90b !important; border-color: #f0b90b !important; }
-
-    /* Trade Cards */
-    .trade-card {
-        background-color: #161a1e;
-        padding: 12px;
-        border-radius: 10px;
-        border-left: 5px solid #26a69a;
-        margin-bottom: 10px;
-    }
+    .stButton > button { border-radius: 5px; background-color: #12151c !important; color: #848e9c !important; border: 1px solid #2b2f3a !important; font-size: 12px; }
+    .stButton > button:hover { border-color: #00ffca !important; color: #00ffca !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA ENGINE ---
+# --- 2. DATA ENGINE (FIXED & UPDATED) ---
 DATA_FILE = "global_trading_book_data.csv"
+# Naye columns ke sath file initialize karna
 if not os.path.exists(DATA_FILE):
-    pd.DataFrame(columns=["Date", "Symbol", "Side", "Type", "Price", "Qty", "PnL", "Mood", "Notes"]).to_csv(DATA_FILE, index=False)
+    pd.DataFrame(columns=["Date", "Symbol", "Side", "Type", "Qty", "PnL", "Mood"]).to_csv(DATA_FILE, index=False)
+
 df = pd.read_csv(DATA_FILE)
 
-# --- 3. TOP SMART NAVIGATION ---
-nav_col = st.columns(4)
-if nav_col[0].button("🌐 TERMINAL"): st.session_state.page = "terminal"
-if nav_col[1].button("🧠 AI COACH"): st.session_state.page = "ai"
-if nav_col[2].button("🏆 ASSETS"): st.session_state.page = "rank"
-if nav_col[3].button("📖 HISTORY"): st.session_state.page = "journal"
+# TypeError Fix: PnL ko hamesha number mein rakhna
+if not df.empty:
+    df['PnL'] = pd.to_numeric(df['PnL'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
-if 'page' not in st.session_state:
-    st.session_state.page = "terminal"
+# --- 3. NAVIGATION ---
+nav = st.columns(4)
+if nav[0].button("🌐 TERMINAL"): st.session_state.page = "terminal"
+if nav[1].button("🧠 AI COACH"): st.session_state.page = "ai"
+if nav[2].button("🏆 ASSETS"): st.session_state.page = "rank"
+if nav[3].button("📅 CALENDAR"): st.session_state.page = "news"
 
-# --- 4. LOGIC ENGINE ---
+if 'page' not in st.session_state: st.session_state.page = "terminal"
 
+# --- 4. TERMINAL PAGE ---
 if st.session_state.page == "terminal":
     sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
     
+    # Chart Widget
     chart_html = f'''
-        <div style="height:550px; width:100%; border-radius: 8px; overflow: hidden; border: 1px solid #1e222d;">
+        <div style="height:500px; border-radius:10px; overflow:hidden; border: 1px solid #1e222d;">
             <div id="tv_chart" style="height:100%;"></div>
             <script src="https://s3.tradingview.com/tv.js"></script>
             <script>
-            new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "style": "1", "container_id": "tv_chart", "hide_side_toolbar": false}});
+            new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "container_id": "tv_chart", "locale": "en"}});
             </script>
         </div>
     '''
-    components.html(chart_html, height=560)
+    components.html(chart_html, height=510)
 
     st.markdown("### ⚡ Quick Execution")
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1: lots = st.number_input("Lots", value=0.01, step=0.01)
-    with c2: pnl_val = st.number_input("PnL ($)", value=0.0)
-    with c3: mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge"])
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: order_type = st.selectbox("Order Type", ["Market", "Limit", "Stop Loss", "Take Profit"])
+    with c2: qty = st.number_input("Qty", value=0.01, step=0.01)
+    with c3: pnl_input = st.number_input("PnL ($)", value=0.0)
+    with c4: mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge", "Impulsive"])
     
-    b_col, s_col = st.columns(2)
-    if b_col.button("🟢 BUY MARKET", use_container_width=True):
-        new_row = [datetime.now().strftime("%d %b, %H:%M"), sym, "BUY", "Market", 0, lots, pnl_val, mood, ""]
+    btn_buy, btn_sell = st.columns(2)
+    
+    if btn_buy.button("🟢 BUY MARKET", use_container_width=True):
+        new_row = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, "BUY", order_type, qty, pnl_input, mood]
         pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
-        st.balloons()
-        st.rerun()
-    if s_col.button("🔴 SELL MARKET", use_container_width=True):
-        new_row = [datetime.now().strftime("%d %b, %H:%M"), sym, "SELL", "Market", 0, lots, pnl_val, mood, ""]
-        pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
-        st.snow()
+        st.toast(f"Logged: {order_type} BUY")
         st.rerun()
 
+    if btn_sell.button("🔴 SELL MARKET", use_container_width=True):
+        new_row = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, "SELL", order_type, qty, pnl_input, mood]
+        pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+        st.toast(f"Logged: {order_type} SELL")
+        st.rerun()
+
+# --- 5. AI COACH (Updated Analysis) ---
 elif st.session_state.page == "ai":
     st.header("🧠 AI Trading Insights")
     if not df.empty:
-        # 1. Key Metrics Cards
-        c1, c2, c3 = st.columns(3)
-        wins = len(df[df['PnL'] > 0])
-        total_trades = len(df)
-        win_rate = (wins / total_trades) * 100
+        col_m1, col_m2 = st.columns(2)
+        win_rate = (len(df[df['PnL'] > 0]) / len(df)) * 100
+        col_m1.metric("Win Rate", f"{win_rate:.1f}%")
+        col_m2.metric("Total PnL", f"${df['PnL'].sum():.2f}")
         
-        c1.metric("Win Rate", f"{win_rate:.1f}%")
-        c2.metric("Total PnL", f"${df['PnL'].sum():.2f}")
-        c3.metric("Trades", total_trades)
-
-        # 2. Equity Curve Graph (Naya Feature)
-        st.subheader("📈 Performance Growth (Equity Curve)")
-        df['Cumulative PnL'] = df['PnL'].cumsum()
-        st.line_chart(df['Cumulative PnL'])
-        
-        # 3. Psychology Impact
-        st.subheader("🎭 Mood vs Profit")
-        st.bar_chart(df.groupby('Mood')['PnL'].sum())
-        
-        # 4. AI Behavioral Coach
-        st.subheader("🤖 Coach Advice")
-        if win_rate < 45:
-            st.error("AI Alert: Win rate thoda kam hai. Apne trade selections par dhyan dein.")
-        elif df[df['Mood'] == 'Revenge']['PnL'].sum() < 0:
-            st.warning("AI Tip: Revenge trading aapka profit kha rahi hai. Discipline laaiye!")
-        else:
-            st.success("Great! Aapka discipline score behtar ho raha hai.")
+        st.subheader("📊 Performance by Order Type")
+        type_analysis = df.groupby('Type')['PnL'].sum()
+        st.bar_chart(type_analysis)
     else:
-        st.info("AI analysis ke liye trades log karein.")
+        st.info("Kam se kam 1 trade log karein AI analysis ke liye.")
+
+# --- 6. REMAINING TABS ---
+elif st.session_state.page == "news":
+    st.header("📅 Economic Calendar")
+    components.html('<script src="https://s3.tradingview.com/external-embedding/embed-widget-events.js" async>{"colorTheme":"dark","width":"100%","height":"600"}</script>', height=620)
 
 elif st.session_state.page == "rank":
-    st.header("🏆 Asset Performance")
-    if not df.empty:
-        rank_df = df.groupby('Symbol')['PnL'].sum().sort_values(ascending=False)
-        st.table(rank_df)
-
-elif st.session_state.page == "journal":
-    st.header("📖 Trade Journal")
-    if not df.empty:
-        for i, row in df.iloc[::-1].iterrows():
-            color = "#26a69a" if row['PnL'] >= 0 else "#ef5350"
-            st.markdown(f"""
-                <div class="trade-card" style="border-left-color: {color}">
-                    <b>{row['Date']}</b> | {row['Symbol']} | {row['Side']}<br>
-                    <span style="color:{color}">PnL: ${row['PnL']}</span> | Mood: {row['Mood']}
-                </div>
-            """, unsafe_allow_html=True)
+    st.header("🏆 Top Assets")
+    components.html('<script src="https://s3.tradingview.com/external-embedding/embed-widget-hotlists.js" async>{"colorTheme":"dark","exchange":"US","width":"100%","height":"600"}</script>', height=620)
