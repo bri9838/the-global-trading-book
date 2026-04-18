@@ -5,108 +5,103 @@ import os
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# --- 1. CONFIG & FULL SCREEN APP LOOK ---
-st.set_page_config(page_title="TGTB Pro Terminal", layout="wide", initial_sidebar_state="collapsed")
+# --- 1. CONFIG & UI ---
+st.set_page_config(page_title="TGTB Terminal", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
-    /* Chart ko border-to-border karne ke liye */
-    .block-container { padding: 0rem !important; max-width: 100% !important; }
+    .block-container { padding: 0.5rem !important; max-width: 100% !important; }
     .stApp { background-color: #000000; }
     header, footer { visibility: hidden; }
     
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] { background-color: #111418 !important; width: 250px !important; }
-    
-    /* Order Panel Styling */
-    .order-box {
-        background-color: #161a1e;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #2d3439;
-        margin: 10px;
+    /* Buttons ko TradingView jaisa premium banane ke liye */
+    .stButton > button {
+        border-radius: 6px;
+        height: 3em;
+        font-weight: bold;
+        background-color: #1e222d !important;
+        color: white !important;
+        border: 1px solid #363c4e !important;
     }
+    
+    /* Buy/Sell colors */
+    div[data-testid="column"]:nth-of-type(1) .stButton > button:hover { border: 1px solid #26a69a !important; }
+    div[data-testid="column"]:nth-of-type(2) .stButton > button:hover { border: 1px solid #ef5350 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA LOAD ---
+# --- 2. DATA ---
 DATA_FILE = "global_trading_book_data.csv"
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["Date", "Symbol", "Side", "Type", "Price", "Qty", "PnL", "Mood", "Notes"]).to_csv(DATA_FILE, index=False)
 df = pd.read_csv(DATA_FILE)
 
-# --- 3. SIDEBAR NAVIGATION (Yahan se saari Report dikhengi) ---
-with st.sidebar:
-    st.markdown("### 📔 TGTB MENU")
-    menu = st.radio("Reports & Tools", ["🌐 Live Terminal", "🧠 AI Analysis", "🏆 Leaderboard", "📝 Trade Journal"])
-    
-    st.divider()
-    # Monthly Progress
-    target = 1000.0
-    current_pnl = df['PnL'].sum() if not df.empty else 0.0
-    st.write(f"Monthly Target: ${current_pnl:.1f} / ${target}")
-    st.progress(min(max(current_pnl/target, 0.0), 1.0))
+# --- 3. TOP NAVIGATION (Hamesha dikhega) ---
+# Yahan humne buttons ko upar rakha hai taaki reports tak turant pahunche
+nav_col = st.columns(4)
+if nav_col[0].button("🌐 TERMINAL"): st.session_state.page = "terminal"
+if nav_col[1].button("🧠 AI REPORT"): st.session_state.page = "ai"
+if nav_col[2].button("🏆 RANKING"): st.session_state.page = "rank"
+if nav_col[3].button("📝 JOURNAL"): st.session_state.page = "journal"
 
-# --- 4. NAVIGATION LOGIC ---
+if 'page' not in st.session_state:
+    st.session_state.page = "terminal"
 
-if menu == "🌐 Live Terminal":
-    # Symbol Input & Top Info
-    t_col1, t_col2 = st.columns([1, 4])
+# --- 4. PAGES LOGIC ---
+
+if st.session_state.page == "terminal":
+    # Symbol Bar
+    t_col1, t_col2, t_col3 = st.columns([2, 1, 1])
     with t_col1:
-        sym = st.text_input("Sym", value="BTCUSDT", label_visibility="collapsed").upper()
-
-    col_chart, col_order = st.columns([4, 1.2])
-
+        sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
+    with t_col2:
+        st.success("LIVE")
+    
+    # Chart & Order Section
+    col_chart, col_order = st.columns([3.5, 1.5])
+    
     with col_chart:
-        # TradingView Chart - 800px High
         chart_html = f'''
-            <div style="height:800px; width:100%;">
+            <div style="height:700px; width:100%; border: 1px solid #2d3439;">
                 <div id="tv_chart" style="height:100%;"></div>
                 <script src="https://s3.tradingview.com/tv.js"></script>
                 <script>
-                new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "style": "1", "container_id": "tv_chart", "hide_side_toolbar": false}});
+                new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "style": "1", "container_id": "tv_chart", "hide_side_toolbar": false, "allow_symbol_change": true}});
                 </script>
             </div>
         '''
-        components.html(chart_html, height=800)
+        components.html(chart_html, height=700)
 
     with col_order:
-        st.markdown('<div class="order-box">', unsafe_allow_html=True)
-        st.subheader("Order")
+        st.subheader("Quick Log")
         lots = st.number_input("Lots", value=0.01, step=0.01)
-        pnl_amt = st.number_input("PnL", value=0.0)
-        mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge", "Impulsive"])
+        pnl_val = st.number_input("PnL ($)", value=0.0)
+        mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge"])
         
-        b_btn = st.button("BUY", type="primary", use_container_width=True)
-        s_btn = st.button("SELL", use_container_width=True)
-        
-        if b_btn or s_btn:
-            side = "BUY" if b_btn else "SELL"
-            new_data = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, side, "Market", 0, lots, pnl_amt, mood, ""]
-            pd.DataFrame([new_data]).to_csv(DATA_FILE, mode='a', header=False, index=False)
-            st.success("Trade Logged!")
-        st.markdown('</div>', unsafe_allow_html=True)
+        b_col, s_col = st.columns(2)
+        if b_col.button("🟢 BUY"):
+            new_row = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, "BUY", "Market", 0, lots, pnl_val, mood, ""]
+            pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+            st.toast("Saved!")
+        if s_col.button("🔴 SELL"):
+            new_row = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, "SELL", "Market", 0, lots, pnl_val, mood, ""]
+            pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+            st.toast("Saved!")
 
-elif menu == "🧠 AI Analysis":
-    st.title("🧠 AI Report")
+elif st.session_state.page == "ai":
+    st.header("🧠 AI Trade Analysis")
     if not df.empty:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Profit by Psychology")
-            st.bar_chart(df.groupby('Mood')['PnL'].sum())
-        with col2:
-            st.subheader("AI Insight")
-            avg_pnl = df['PnL'].mean()
-            if avg_pnl > 0: st.success(f"Discipline Score High! Average profit ${avg_pnl:.2f}")
-            else: st.warning("AI Hint: Check your FOMO trades in the Leaderboard.")
-    else: st.info("No data found.")
+        st.bar_chart(df.groupby('Mood')['PnL'].sum())
+        st.write("### AI Coach Advice")
+        if df['PnL'].sum() < 0: st.error("Dhyan dein: Aapki strategy mein emotional trading zyada ho rahi hai.")
+        else: st.success("Keep it up! Aapka discipline score badh raha hai.")
+    else: st.info("No data.")
 
-elif menu == "🏆 Leaderboard":
-    st.title("🏆 Best Trading Symbols")
+elif st.session_state.page == "rank":
+    st.header("🏆 Symbol Ranking")
     if not df.empty:
-        leaderboard = df.groupby('Symbol')['PnL'].sum().sort_values(ascending=False)
-        st.table(leaderboard)
+        st.table(df.groupby('Symbol')['PnL'].sum().sort_values(ascending=False))
 
-elif menu == "📝 Trade Journal":
-    st.title("📝 Journal History")
-    st.dataframe(df.sort_values(by="Date", ascending=False), use_container_width=True)
+elif st.session_state.page == "journal":
+    st.header("📝 Full History")
+    st.dataframe(df, use_container_width=True)
