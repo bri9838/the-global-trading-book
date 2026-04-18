@@ -42,7 +42,7 @@ with st.sidebar:
     
     st.divider()
     # Monthly Progress
-    target = 1000.0
+    target = 10000.0
     current_pnl = df['PnL'].sum() if not df.empty else 0.0
     st.write(f"Monthly Target: ${current_pnl:.1f} / ${target}")
     st.progress(min(max(current_pnl/target, 0.0), 1.0))
