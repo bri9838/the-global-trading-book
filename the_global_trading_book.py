@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# --- 1. PRO CONFIG & MOBILE OPTIMIZATION ---
+# --- 1. PRO CONFIG & UI ---
 st.set_page_config(page_title="TGTB Pro Terminal", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -14,7 +14,7 @@ st.markdown("""
     .stApp { background-color: #06080a; }
     header, footer { visibility: hidden; }
     
-    /* Navigation Buttons Styling */
+    /* Navigation Buttons */
     .stButton > button {
         border-radius: 8px;
         height: 2.8em;
@@ -22,11 +22,10 @@ st.markdown("""
         background-color: #12151c !important;
         color: #848e9c !important;
         border: 1px solid #2b2f3a !important;
-        transition: 0.3s;
     }
     .stButton > button:hover { color: #f0b90b !important; border-color: #f0b90b !important; }
 
-    /* Custom Card for Journal */
+    /* Trade Cards */
     .trade-card {
         background-color: #161a1e;
         padding: 12px;
@@ -56,71 +55,130 @@ if 'page' not in st.session_state:
 # --- 4. LOGIC ENGINE ---
 
 if st.session_state.page == "terminal":
-    # Layout: Chart (Top) | Controls (Bottom for Mobile)
-    sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
+    # --- MARKET PULSE (GAINERS/LOSERS TAPE) ---
+    ticker_html = '''
+    <div style="height:60px; background-color:#06080a; border-bottom:1px solid #1e222d;">
+        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
+        {
+        "symbols": [
+            {"proName": "NSE:NIFTY", "title": "Nifty 50"},
+            {"proName": "NSE:BANKNIFTY", "title": "Bank Nifty"},
+            {"s": "NSE:RELIANCE", "d": "Reliance"},
+            {"s": "NSE:HDFCBANK", "d": "HDFC Bank"},
+            {"s": "NSE:TCS", "d": "TCS"},
+            {"s": "NSE:ICICIBANK", "d": "ICICI Bank"}
+        ],
+        "showSymbolLogo": true,
+        "colorTheme": "dark",
+        "isTransparent": true,
+        "displayMode": "adaptive",
+        "locale": "in"
+        }
+        </script>
+    </div>
+    '''
+    components.html(ticker_html, height=60)
+
+    # Symbol Input & Chart
+    sym = st.text_input("Symbol", value="NSE:NIFTY", label_visibility="collapsed").upper()
     
-    # 80vh Chart for full mobile height
     chart_html = f'''
-        <div style="height:550px; width:100%; border-radius: 8px; overflow: hidden; border: 1px solid #1e222d;">
+        <div style="height:500px; width:100%; border-radius: 8px; overflow: hidden; border: 1px solid #1e222d;">
             <div id="tv_chart" style="height:100%;"></div>
             <script src="https://s3.tradingview.com/tv.js"></script>
             <script>
-            new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "style": "1", "container_id": "tv_chart", "hide_side_toolbar": false}});
+            new TradingView.widget({{
+              "autosize": true,
+              "symbol": "{sym}",
+              "interval": "15",
+              "timezone": "Asia/Kolkata",
+              "theme": "dark",
+              "style": "1",
+              "locale": "in",
+              "hide_side_toolbar": false,
+              "allow_symbol_change": true,
+              "container_id": "tv_chart"
+            }});
             </script>
         </div>
     '''
-    components.html(chart_html, height=560)
+    components.html(chart_html, height=510)
 
-    # Order Panel - Horizontal on Desktop, Vertical on Mobile
     st.markdown("### ⚡ Quick Execution")
     c1, c2, c3 = st.columns([1, 1, 1])
-    with c1: lots = st.number_input("Lots", value=0.01, step=0.01)
-    with c2: pnl_val = st.number_input("PnL ($)", value=0.0)
-    with c3: mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge"])
+    with c1: lots = st.number_input("Qty", value=1, step=1)
+    with c2: pnl_val = st.number_input("PnL (₹)", value=0.0)
+    with c3: mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge", "Impulsive"])
     
     b_col, s_col = st.columns(2)
     if b_col.button("🟢 BUY MARKET", use_container_width=True):
         new_row = [datetime.now().strftime("%d %b, %H:%M"), sym, "BUY", "Market", 0, lots, pnl_val, mood, ""]
         pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
         st.balloons()
-        st.success("Trade Secured!")
+        st.rerun()
     if s_col.button("🔴 SELL MARKET", use_container_width=True):
         new_row = [datetime.now().strftime("%d %b, %H:%M"), sym, "SELL", "Market", 0, lots, pnl_val, mood, ""]
         pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
         st.snow()
-        st.error("Trade Logged!")
+        st.rerun()
 
 elif st.session_state.page == "ai":
-    st.header("🧠 AI Trading Coach")
+    st.header("🧠 AI Trading Insights")
     if not df.empty:
-        total_pnl = df['PnL'].sum()
-        fomo_count = len(df[df['Mood'] == 'FOMO'])
+        c1, c2, c3 = st.columns(3)
+        wins = len(df[df['PnL'] > 0])
+        total_trades = len(df)
+        win_rate = (wins / total_trades) * 100
         
-        # AI Logic
-        st.subheader("Today's Insight")
-        if fomo_count > 2:
-            st.warning(f"AI Alert: Aapne {fomo_count} trades FOMO mein liye hain. Overtrading se bachein!")
-        if total_pnl > 0:
-            st.success(f"Discipline Payoff: Aapka total profit ${total_pnl:.2f} hai. Good job!")
+        c1.metric("Win Rate", f"{win_rate:.1f}%")
+        c2.metric("Total PnL", f"₹{df['PnL'].sum():.2f}")
+        c3.metric("Trades", total_trades)
+
+        st.subheader("📈 Performance Growth")
+        df['Cumulative PnL'] = df['PnL'].cumsum()
+        st.line_chart(df['Cumulative PnL'])
         
-        st.subheader("Psychology Breakdown")
-        st.bar_chart(df.groupby('Mood')['PnL'].sum())
-    else: st.info("Kam se kam 1 trade log karein AI analysis ke liye.")
+        st.subheader("🤖 Coach Advice")
+        if win_rate < 45: st.error("AI Alert: Win rate thoda kam hai.")
+        else: st.success("Great! Aapka discipline score behtar ho raha hai.")
+    else: st.info("AI analysis ke liye trades log karein.")
 
 elif st.session_state.page == "rank":
-    st.header("🏆 Top Performing Symbols")
-    if not df.empty:
-        rank_df = df.groupby('Symbol')['PnL'].sum().sort_values(ascending=False)
-        st.dataframe(rank_df, use_container_width=True)
+    st.header("🏆 Asset Performance")
+    # Yahan hum NSE Top Gainers ka widget add kar rahe hain
+    gainer_loser_html = '''
+    <div style="height:600px;">
+        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-hotlists.js" async>
+        {
+          "colorTheme": "dark",
+          "dateRange": "12M",
+          "exchange": "NSE",
+          "showChart": true,
+          "locale": "in",
+          "width": "100%",
+          "height": "600",
+          "largeChartUrl": "",
+          "isTransparent": true,
+          "showSymbolLogo": true,
+          "showFloatingTooltip": false,
+          "plotLineColorGrowing": "rgba(41, 98, 255, 1)",
+          "plotLineColorFalling": "rgba(41, 98, 255, 1)",
+          "gridLineColor": "rgba(240, 243, 250, 0)",
+          "scaleFontColor": "rgba(106, 109, 120, 1)",
+          "belowLineFillColorGrowing": "rgba(41, 98, 255, 0.12)",
+          "belowLineFillColorFalling": "rgba(41, 98, 255, 0.12)",
+          "belowLineFillColorGrowingBottom": "rgba(41, 98, 255, 0)",
+          "belowLineFillColorFallingBottom": "rgba(41, 98, 255, 0)",
+          "symbolActiveColor": "rgba(41, 98, 255, 0.12)"
+        }
+        </script>
+    </div>
+    '''
+    components.html(gainer_loser_html, height=620)
 
 elif st.session_state.page == "journal":
-    st.header("📖 Trade History")
+    st.header("📖 Trade Journal")
     if not df.empty:
-        for i, row in df.iloc[::-1].iterrows(): # Latest first
+        for i, row in df.iloc[::-1].iterrows():
             color = "#26a69a" if row['PnL'] >= 0 else "#ef5350"
-            st.markdown(f"""
-                <div class="trade-card" style="border-left-color: {color}">
-                    <b>{row['Date']}</b> | {row['Symbol']} - {row['Side']}<br>
-                    <span style="color:{color}">PnL: ${row['PnL']}</span> | Mood: {row['Mood']}
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="trade-card" style="border-left-color: {color}"><b>{row["Date"]}</b> | {row["Symbol"]}<br><span style="color:{color}">PnL: ₹{row["PnL"]}</span> | Mood: {row["Mood"]}</div>', unsafe_allow_html=True)
