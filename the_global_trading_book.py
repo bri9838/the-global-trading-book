@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import os
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# --- 1. CONFIG ---
+# --- 1. CONFIG & UI ---
 st.set_page_config(page_title="TGTB Pro Terminal", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -13,89 +12,104 @@ st.markdown("""
     .block-container { padding: 0.5rem !important; }
     .stApp { background-color: #06080a; color: #e0e3eb; }
     header, footer { visibility: hidden; }
-    .stButton > button { border-radius: 5px; background-color: #12151c !important; color: #848e9c !important; border: 1px solid #2b2f3a !important; font-size: 12px; }
+    .stButton > button { border-radius: 5px; background-color: #12151c !important; color: #848e9c !important; border: 1px solid #2b2f3a !important; font-size: 11px; }
     .stButton > button:hover { border-color: #00ffca !important; color: #00ffca !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA ENGINE (FIXED & UPDATED) ---
+# --- 2. DATA ENGINE ---
 DATA_FILE = "global_trading_book_data.csv"
-# Naye columns ke sath file initialize karna
-if not os.path.exists(DATA_FILE):
-    pd.DataFrame(columns=["Date", "Symbol", "Side", "Type", "Qty", "PnL", "Mood"]).to_csv(DATA_FILE, index=False)
+BT_FILE = "backtest_data.csv"
+
+# Columns sync with RR
+COLS_REAL = ["Date", "Symbol", "Side", "Type", "Qty", "Entry", "SL", "TP", "PnL", "RR", "Mood"]
+COLS_BT = ["Strategy", "Result", "PnL", "RR", "Notes"]
+
+if not os.path.exists(DATA_FILE): pd.DataFrame(columns=COLS_REAL).to_csv(DATA_FILE, index=False)
+if not os.path.exists(BT_FILE): pd.DataFrame(columns=COLS_BT).to_csv(BT_FILE, index=False)
 
 df = pd.read_csv(DATA_FILE)
+bt_df = pd.read_csv(BT_FILE)
 
-# TypeError Fix: PnL ko hamesha number mein rakhna
-if not df.empty:
-    df['PnL'] = pd.to_numeric(df['PnL'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-
-# --- 3. NAVIGATION ---
-nav = st.columns(4)
+# --- 3. NAVIGATION (6 TABS) ---
+nav = st.columns(6)
 if nav[0].button("🌐 TERMINAL"): st.session_state.page = "terminal"
-if nav[1].button("🧠 AI COACH"): st.session_state.page = "ai"
+if nav[1].button("🧠 COACH"): st.session_state.page = "ai"
 if nav[2].button("🏆 ASSETS"): st.session_state.page = "rank"
-if nav[3].button("📅 CALENDAR"): st.session_state.page = "news"
+if nav[3].button("📖 HISTORY"): st.session_state.page = "history"
+if nav[4].button("📊 STATS"): st.session_state.page = "stats"
+if nav[5].button("🧪 BACKTEST"): st.session_state.page = "backtest"
 
 if 'page' not in st.session_state: st.session_state.page = "terminal"
 
-# --- 4. TERMINAL PAGE ---
+# --- HELPER: RR CALCULATOR ---
+def calculate_rr(entry, sl, tp):
+    try:
+        risk = abs(entry - sl)
+        reward = abs(tp - entry)
+        return round(reward / risk, 2) if risk != 0 else 0
+    except: return 0
+
+# --- 4. TERMINAL TAB ---
 if st.session_state.page == "terminal":
     sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
-    
-    # Chart Widget
-    chart_html = f'''
-        <div style="height:500px; border-radius:10px; overflow:hidden; border: 1px solid #1e222d;">
-            <div id="tv_chart" style="height:100%;"></div>
-            <script src="https://s3.tradingview.com/tv.js"></script>
-            <script>
-            new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "container_id": "tv_chart", "locale": "en"}});
-            </script>
-        </div>
-    '''
-    components.html(chart_html, height=510)
+    components.html(f'<div style="height:400px;"><div id="tv"></div><script src="https://s3.tradingview.com/tv.js"></script><script>new TradingView.widget({{"autosize": true, "symbol": "{sym}", "interval": "15", "theme": "dark", "container_id": "tv"}});</script></div>', height=410)
 
-    st.markdown("### ⚡ Quick Execution")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: order_type = st.selectbox("Order Type", ["Market", "Limit", "Stop Loss", "Take Profit"])
-    with c2: qty = st.number_input("Qty", value=0.01, step=0.01)
-    with c3: pnl_input = st.number_input("PnL ($)", value=0.0)
-    with c4: mood = st.selectbox("Mood", ["Disciplined", "FOMO", "Revenge", "Impulsive"])
+    st.markdown("### ⚡ Execution & RR")
+    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+    o_type = r1c1.selectbox("Type", ["Market", "Limit", "SL"])
+    qty = r1c2.number_input("Qty", value=0.01)
+    mood = r1c3.selectbox("Mood", ["Disciplined", "FOMO", "Revenge"])
+    side = r1c4.selectbox("Side", ["BUY", "SELL"])
+
+    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+    ent = r2c1.number_input("Entry", value=0.0)
+    sl = r2c2.number_input("SL", value=0.0)
+    tp = r2c3.number_input("TP", value=0.0)
+    pnl = r2c4.number_input("PnL", value=0.0)
     
-    btn_buy, btn_sell = st.columns(2)
-    
-    if btn_buy.button("🟢 BUY MARKET", use_container_width=True):
-        new_row = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, "BUY", order_type, qty, pnl_input, mood]
-        pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
-        st.toast(f"Logged: {order_type} BUY")
+    current_rr = calculate_rr(ent, sl, tp)
+    st.info(f"Planned RR: 1 : {current_rr}")
+
+    if st.button("LOG TRADE", use_container_width=True):
+        new_trade = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, side, o_type, qty, ent, sl, tp, pnl, current_rr, mood]
+        pd.DataFrame([new_trade]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+        st.success("Trade Logged Successfully!")
         st.rerun()
 
-    if btn_sell.button("🔴 SELL MARKET", use_container_width=True):
-        new_row = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, "SELL", order_type, qty, pnl_input, mood]
-        pd.DataFrame([new_row]).to_csv(DATA_FILE, mode='a', header=False, index=False)
-        st.toast(f"Logged: {order_type} SELL")
-        st.rerun()
-
-# --- 5. AI COACH (Updated Analysis) ---
-elif st.session_state.page == "ai":
-    st.header("🧠 AI Trading Insights")
+# --- 5. HISTORY TAB (With Download) ---
+elif st.session_state.page == "history":
+    st.header("📖 Trade Journal")
     if not df.empty:
-        col_m1, col_m2 = st.columns(2)
-        win_rate = (len(df[df['PnL'] > 0]) / len(df)) * 100
-        col_m1.metric("Win Rate", f"{win_rate:.1f}%")
-        col_m2.metric("Total PnL", f"${df['PnL'].sum():.2f}")
-        
-        st.subheader("📊 Performance by Order Type")
-        type_analysis = df.groupby('Type')['PnL'].sum()
-        st.bar_chart(type_analysis)
-    else:
-        st.info("Kam se kam 1 trade log karein AI analysis ke liye.")
+        st.dataframe(df.iloc[::-1], use_container_width=True)
+        # Download Button
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download History CSV", data=csv, file_name="trading_history.csv", mime="text/csv")
+    else: st.info("No trades found.")
 
-# --- 6. REMAINING TABS ---
-elif st.session_state.page == "news":
-    st.header("📅 Economic Calendar")
-    components.html('<script src="https://s3.tradingview.com/external-embedding/embed-widget-events.js" async>{"colorTheme":"dark","width":"100%","height":"600"}</script>', height=620)
+# --- 6. BACKTEST TAB (With Download) ---
+elif st.session_state.page == "backtest":
+    st.header("🧪 Strategy Backtester")
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st_name = st.text_input("Strategy")
+        b_ent = st.number_input("B-Entry", value=0.0)
+        b_sl = st.number_input("B-SL", value=0.0)
+        b_tp = st.number_input("B-TP", value=0.0)
+        b_rr = calculate_rr(b_ent, b_sl, b_tp)
+        b_pnl = st.number_input("B-PnL", value=0.0)
+        if st.button("Save Test"):
+            pd.DataFrame([[st_name, "Done", b_pnl, b_rr, "N/A"]]).to_csv(BT_FILE, mode='a', header=False, index=False)
+            st.rerun()
+    with col2:
+        st.dataframe(bt_df.iloc[::-1], use_container_width=True)
+        # Download Button
+        csv_bt = bt_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Backtest CSV", data=csv_bt, file_name="backtest_report.csv", mime="text/csv")
 
-elif st.session_state.page == "rank":
-    st.header("🏆 Top Assets")
-    components.html('<script src="https://s3.tradingview.com/external-embedding/embed-widget-hotlists.js" async>{"colorTheme":"dark","exchange":"US","width":"100%","height":"600"}</script>', height=620)
+# --- 7. AI COACH, STATS, ASSETS (Remaining Logic) ---
+elif st.session_state.page == "ai":
+    st.header("🧠 AI Analysis")
+    if not df.empty:
+        st.metric("Total Equity PnL", f"${df['PnL'].sum():.2f}")
+        st.line_chart(df['PnL'].cumsum())
