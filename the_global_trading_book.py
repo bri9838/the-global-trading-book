@@ -5,6 +5,7 @@ from datetime import datetime
 import streamlit.components.v1 as components
 import base64
 import time
+import requests # Live price ke liye zaruri hai
 
 # --- 1. FIXED UI CONFIG (THEME & CHART LOCKED) ---
 st.set_page_config(page_title="TGTB AI Terminal", layout="wide", initial_sidebar_state="collapsed")
@@ -25,11 +26,6 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* Close Button Style */
-    div[data-testid="column"]:nth-child(3) button {
-        background: linear-gradient(135deg, #ff4b2b 0%, #ff416c 100%) !important;
-    }
-
     /* Chart Height Lock */
     iframe { min-height: 650px !important; border: 2px solid #6a11cb; border-radius: 12px; }
     
@@ -42,7 +38,17 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA ENGINE (FIXED TO SHOW DATA) ---
+# --- 2. LIVE PRICE ENGINE (NEW) ---
+def get_live_price(symbol):
+    try:
+        # Binance API se live price uthane ke liye
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+        data = requests.get(url).json()
+        return float(data['price'])
+    except:
+        return None
+
+# --- 3. DATA ENGINE ---
 DATA_FILE = "global_trading_book_data.csv"
 COLS = ["Date", "Symbol", "Side", "Type", "Qty", "Entry", "SL", "TP", "PnL", "RR", "Mood", "Screenshot", "Status"]
 
@@ -53,14 +59,14 @@ def load_data():
     try:
         temp_df = pd.read_csv(DATA_FILE)
         temp_df['PnL'] = pd.to_numeric(temp_df['PnL'], errors='coerce').fillna(0.0)
+        temp_df['Entry'] = pd.to_numeric(temp_df['Entry'], errors='coerce').fillna(0.0)
         temp_df['Qty'] = pd.to_numeric(temp_df['Qty'], errors='coerce').fillna(0.0)
         return temp_df
-    except: 
-        return pd.DataFrame(columns=COLS)
+    except: return pd.DataFrame(columns=COLS)
 
 df = load_data()
 
-# --- 3. NAVIGATION ---
+# --- 4. NAVIGATION ---
 nav = st.columns(6)
 pages = {"🌐 TERMINAL": "terminal", "🧠 AI COACH": "ai", "🏆 ASSETS": "rank", "📖 HISTORY": "history", "📊 STATS": "stats", "🧪 BACKTEST": "backtest"}
 for i, (label, page_id) in enumerate(pages.items()):
@@ -68,9 +74,11 @@ for i, (label, page_id) in enumerate(pages.items()):
 
 if 'page' not in st.session_state: st.session_state.page = "terminal"
 
-# --- 4. TERMINAL (LOCKED) ---
+# --- 5. TERMINAL (LIVE PNL UPDATED) ---
 if st.session_state.page == "terminal":
-    sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
+    sym = st.text_input("Symbol", value="BTCUSDT", key="sym_input", label_visibility="collapsed").upper()
+    
+    # Locked Chart
     chart_url = f"https://s.tradingview.com/widgetembed/?symbol={sym}&interval=15&theme=dark"
     st.components.v1.iframe(chart_url, height=650)
 
@@ -80,55 +88,60 @@ if st.session_state.page == "terminal":
     if not open_trades.empty:
         last_open = open_trades.iloc[-1]
         idx = open_trades.index[-1]
-        current_pnl = float(last_open['Qty']) * 15.20 
         
-        c_pnl, c_info, c_action = st.columns([2, 2, 1])
-        with c_pnl:
-            st.markdown(f'<div class="pnl-box"><span style="color:#848e9c; font-size:12px;">M2M LIVE PNL</span><br><span style="font-size:24px; color:#00ffca; font-weight:bold;">+ ${current_pnl:.2f}</span></div>', unsafe_allow_html=True)
-        c_info.write(f"**{last_open['Symbol']}** | {last_open['Side']}")
-        
-        if c_action.button("CLOSE TRADE", key="close_pos"):
-            df.loc[idx, 'Status'] = 'CLOSED'
-            df.loc[idx, 'PnL'] = current_pnl
-            df.to_csv(DATA_FILE, index=False)
+        # LIVE PRICE CALCULATION
+        curr_price = get_live_price(last_open['Symbol'])
+        if curr_price:
+            entry = float(last_open['Entry'])
+            qty = float(last_open['Qty'])
+            # PnL Calculation: (Current - Entry) for BUY, (Entry - Current) for SELL
+            if last_open['Side'] == "BUY":
+                live_pnl = (curr_price - entry) * qty
+            else:
+                live_pnl = (entry - curr_price) * qty
+            
+            pnl_color = "#00ffca" if live_pnl >= 0 else "#ff4b2b"
+            
+            c_pnl, c_info, c_action = st.columns([2, 2, 1])
+            with c_pnl:
+                st.markdown(f'''<div class="pnl-box" style="border-left-color: {pnl_color};">
+                    <span style="color:#848e9c; font-size:12px;">LIVE M2M PNL ({last_open['Symbol']})</span><br>
+                    <span style="font-size:24px; color:{pnl_color}; font-weight:bold;">{" + " if live_pnl >= 0 else ""}${live_pnl:.2f}</span>
+                </div>''', unsafe_allow_html=True)
+            
+            c_info.write(f"**Price:** {curr_price} | **Entry:** {entry}")
+            
+            if c_action.button("CLOSE TRADE", key="close_pos"):
+                df.loc[idx, 'Status'] = 'CLOSED'
+                df.loc[idx, 'PnL'] = live_pnl
+                df.to_csv(DATA_FILE, index=False)
+                st.rerun()
+            
+            # Auto-refresh for live effect
+            time.sleep(2)
             st.rerun()
     else:
         st.info("No active positions.")
 
-    # Execution Inputs
+    # Execution Section (Locked)
     st.markdown("### ⚡ Execution")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2 = st.columns(2)
     side = c1.selectbox("Side", ["BUY", "SELL"])
-    qty = c3.number_input("Qty", value=0.01)
-    ent = st.number_input("Entry Price", value=0.0)
+    qty_in = c2.number_input("Qty", value=0.01, step=0.01)
+    ent_in = st.number_input("Entry Price", value=0.0)
 
     if st.button("EXECUTE & OPEN", use_container_width=True):
-        new_trade = [datetime.now().strftime("%y-%m-%d %H:%M"), sym, side, "Market", qty, ent, 0, 0, 0, 0, "Disciplined", "", "OPEN"]
+        new_trade = [datetime.now().strftime("%y-%m-%d %H:%M"), sym, side, "Market", qty_in, ent_in, 0, 0, 0, 0, "Disciplined", "", "OPEN"]
         pd.DataFrame([new_trade]).to_csv(DATA_FILE, mode='a', header=False, index=False)
         st.rerun()
 
-# --- 5. AI COACH (FIXED: SHOWS DATA NOW) ---
+# --- OTHER PAGES (AI COACH & HISTORY) LOCKED ---
 elif st.session_state.page == "ai":
     st.header("🧠 AI Intelligence Insights")
     if not df.empty:
-        total_pnl = df['PnL'].sum()
-        win_count = len(df[df['PnL'] > 0])
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total PnL", f"${total_pnl:.2f}")
-        m2.metric("Total Trades", len(df))
-        m3.metric("Wins", win_count)
-        
-        st.subheader("Profit Curve")
+        st.metric("Total PnL", f"${df['PnL'].sum():.2f}")
         st.line_chart(df['PnL'].cumsum())
-    else:
-        st.warning("Data file khali hai. Pehle Terminal mein trade execute karein.")
 
-# --- 6. HISTORY (FIXED: SHOWS LIST NOW) ---
 elif st.session_state.page == "history":
     st.header("📖 Master Log History")
-    if not df.empty:
-        # Latest trades upar dikhane ke liye reverse kiya hai
-        st.dataframe(df.iloc[::-1], use_container_width=True)
-    else:
-        st.info("Abhi tak koi trade history nahi hai.")
+    st.dataframe(df.iloc[::-1], use_container_width=True)
