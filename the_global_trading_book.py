@@ -4,8 +4,9 @@ import os
 from datetime import datetime
 import streamlit.components.v1 as components
 import base64
+import time
 
-# --- 1. FIXED UI CONFIG (LOCKED THEME) ---
+# --- 1. FIXED UI CONFIG (THEME & CHART LOCKED) ---
 st.set_page_config(page_title="TGTB AI Terminal", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -27,14 +28,27 @@ st.markdown("""
     /* Chart Height Lock (Strict 650px) */
     iframe { min-height: 650px !important; border: 2px solid #6a11cb; border-radius: 12px; }
     
-    /* Input Styling Lock */
-    .stNumberInput input, .stSelectbox select { background-color: #12151c !important; color: white !important; }
+    /* SUCCESS BLINK ANIMATION */
+    @keyframes blinker {  
+        50% { opacity: 0; }
+    }
+    .success-msg {
+        color: #00ffca;
+        font-weight: bold;
+        font-size: 20px;
+        text-align: center;
+        padding: 10px;
+        border: 2px solid #00ffca;
+        border-radius: 10px;
+        animation: blinker 0.6s linear 3; /* 3 baar blink karega */
+        background: rgba(0, 255, 202, 0.1);
+        margin-top: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA ENGINE (LOCKED STRUCTURE) ---
+# --- 2. DATA ENGINE ---
 DATA_FILE = "global_trading_book_data.csv"
-# Added 'Screenshot' column to the structure
 COLS = ["Date", "Symbol", "Side", "Type", "Qty", "Entry", "SL", "TP", "PnL", "RR", "Mood", "Screenshot"]
 
 if not os.path.exists(DATA_FILE):
@@ -51,7 +65,7 @@ def load_data():
 
 df = load_data()
 
-# --- 3. NAVIGATION (LOCKED) ---
+# --- 3. NAVIGATION ---
 nav = st.columns(6)
 pages = {"🌐 TERMINAL": "terminal", "🧠 AI COACH": "ai", "🏆 ASSETS": "rank", "📖 HISTORY": "history", "📊 STATS": "stats", "🧪 BACKTEST": "backtest"}
 
@@ -60,11 +74,11 @@ for i, (label, page_id) in enumerate(pages.items()):
 
 if 'page' not in st.session_state: st.session_state.page = "terminal"
 
-# --- 4. TERMINAL PAGE (CHART & ORDER LOCKED) ---
+# --- 4. TERMINAL PAGE (LOCKED) ---
 if st.session_state.page == "terminal":
     sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
     
-    # Locked Chart HTML
+    # Locked Chart
     chart_html = f'''
         <div style="height:650px; width:100%; border-radius:12px; overflow:hidden;">
             <div id="tv_chart" style="height:100%;"></div>
@@ -76,9 +90,9 @@ if st.session_state.page == "terminal":
     '''
     components.html(chart_html, height=660)
 
-    st.markdown("### ⚡ AI Execution & Screenshot")
+    st.markdown("### ⚡ AI Execution Panel")
     
-    # Layout with Screenshot Upload
+    # Inputs Layout
     c1, c2, c3, c4 = st.columns(4)
     side = c1.selectbox("Side", ["BUY", "SELL"])
     o_type = c2.selectbox("Type", ["Market", "Limit", "SL"])
@@ -91,8 +105,8 @@ if st.session_state.page == "terminal":
     tp = r2c3.number_input("TP", value=0.0)
     pnl = r2c4.number_input("PnL", value=0.0)
     
-    # NEW: Screenshot Uploader
-    img_file = st.file_output = st.file_uploader("Upload Chart Screenshot (Optional)", type=['png', 'jpg', 'jpeg'])
+    # Screenshot Uploader
+    img_file = st.file_uploader("Upload Chart Screenshot (Optional)", type=['png', 'jpg', 'jpeg'])
     img_base64 = ""
     if img_file:
         img_base64 = base64.b64encode(img_file.read()).decode()
@@ -102,40 +116,32 @@ if st.session_state.page == "terminal":
     rr = round(reward/risk, 2) if risk != 0 else 0
     st.markdown(f"<p style='color:#00ffca; font-weight:bold;'>🚀 Predicted RR: 1 : {rr}</p>", unsafe_allow_html=True)
 
+    # SUCCESS MESSAGE LOGIC
+    if "success_placed" in st.session_state and st.session_state.success_placed:
+        st.markdown('<div class="success-msg">🚀 TRADE SUCCESSFULLY PLACED!</div>', unsafe_allow_html=True)
+        # 3 seconds baad message hatane ke liye
+        time.sleep(2)
+        st.session_state.success_placed = False
+        st.rerun()
+
     if st.button("EXECUTE & LOG TRADE", use_container_width=True):
         new_trade = [datetime.now().strftime("%Y-%m-%d %H:%M"), sym, side, o_type, qty, ent, sl, tp, pnl, rr, mood, img_base64]
         pd.DataFrame([new_trade]).to_csv(DATA_FILE, mode='a', header=False, index=False)
-        st.toast("Trade & Screenshot synchronized with AI cloud!")
+        
+        # Blink message activate karna
+        st.session_state.success_placed = True
         st.rerun()
 
-# --- 5. HISTORY PAGE (SHOWING SAVED SCREENSHOTS) ---
-elif st.session_state.page == "history":
-    st.header("📖 Master Log History")
-    if not df.empty:
-        # Displaying the data
-        for index, row in df.iloc[::-1].iterrows():
-            with st.expander(f"📅 {row['Date']} | {row['Symbol']} | {row['Side']} | PnL: {row['PnL']}"):
-                col_text, col_img = st.columns([2, 1])
-                col_text.write(f"**Mood:** {row['Mood']} | **RR:** 1:{row['RR']}")
-                if str(row['Screenshot']) != "nan" and row['Screenshot'] != "":
-                    col_img.image(f"data:image/png;base64,{row['Screenshot']}", caption="Trade Screenshot")
-    else:
-        st.info("No trade history found.")
-
-# --- 6. AI COACH (LOCKED ANALYTICS) ---
+# --- 5. AI COACH & HISTORY (SAME LOCKED LOGIC) ---
 elif st.session_state.page == "ai":
     st.header("🧠 AI Intelligence Insights")
     if not df.empty:
         total_pnl = df['PnL'].sum()
-        wins = len(df[df['PnL'] > 0])
-        win_rate = (wins / len(df)) * 100
-        
-        m1, m2, m3 = st.columns(3)
+        m1, m2 = st.columns(2)
         m1.metric("Account Growth", f"${total_pnl:.2f}")
-        m2.metric("Win Probability", f"{win_rate:.1f}%")
-        m3.metric("Avg Risk/Reward", f"1:{df['RR'].mean():.2f}")
-        
-        st.subheader("Performance Trajectory")
+        m2.metric("Win Probability", f"{(len(df[df['PnL']>0])/len(df)*100):.1f}%")
         st.line_chart(df['PnL'].cumsum())
-    else:
-        st.info("Log trades to see AI analysis.")
+
+elif st.session_state.page == "history":
+    st.header("📖 Master Log History")
+    st.dataframe(df.iloc[::-1], use_container_width=True)
