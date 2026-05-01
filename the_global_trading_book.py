@@ -1,90 +1,125 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import os
 from datetime import datetime
-import requests
-import time
+import streamlit.components.v1 as components
 
-# --- 1. UI CONFIG (LAYOUT LOCK) ---
-# Is section mein humne height aur padding ko fix rakha hai jaisa Screenshot_20260427_110945_2.jpg mein tha
-st.set_page_config(page_title="TGTB Terminal", layout="wide", initial_sidebar_state="collapsed")
+# --- 1. SETTINGS & THEME LOCK ---
+st.set_page_config(page_title="TGTB Master Terminal", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
-    .block-container { padding: 0.5rem !important; } /* Mobile optimization lock */
-    .stApp { background: radial-gradient(circle at top right, #1d0e3a, #06080a 70%); color: #e0e3eb; }
+    .block-container { padding: 0.5rem !important; }
+    .stApp { background: #06080a; color: #e0e3eb; }
+    header, footer { visibility: hidden; }
     
-    /* CHART SIZE LOCK: Isse aapka chart chota nahi hoga */
-    iframe { min-height: 650px !important; border: 1px solid #6a11cb; border-radius: 8px; }
-    
-    /* Nav Buttons Style */
-    .stButton > button {
-        background: #111418; color: white; border: 1px solid #2d3139; border-radius: 5px;
+    /* CHART & DRAWING BAR LOCK */
+    .chart-wrapper {
+        height: 650px !important;
+        border: 2px solid #6a11cb;
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 10px;
     }
     
-    /* Progress Bar Style for AI Report (Screenshot 3/6) */
-    .p-bar-bg { width: 100%; background: #2d3139; border-radius: 10px; margin-bottom: 10px; }
-    .p-bar-fill { height: 10px; border-radius: 10px; }
+    /* BUTTON & METRIC STYLING */
+    .stButton > button {
+        border-radius: 8px; font-weight: bold;
+        border: 1px solid #6a11cb !important;
+        background: rgba(106, 17, 203, 0.1);
+    }
+    [data-testid="stMetricValue"] { color: #00ffca !important; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- 2. DATA ENGINE ---
 DATA_FILE = "global_trading_book_data.csv"
-if 'df' not in st.session_state:
-    try: st.session_state.df = pd.read_csv(DATA_FILE)
-    except: st.session_state.df = pd.DataFrame(columns=["Date", "Symbol", "Side", "Qty", "Entry", "PnL", "Status", "Discipline", "Risk"])
+if not os.path.exists(DATA_FILE):
+    pd.DataFrame(columns=["Date", "Symbol", "Side", "Type", "Qty", "Entry", "Exit", "PnL", "Status"]).to_csv(DATA_FILE, index=False)
 
-# --- 3. TOP NAVIGATION (Locked Style) ---
+def get_data(): 
+    return pd.read_csv(DATA_FILE)
+
+# --- 3. NAVIGATION ---
+if 'page' not in st.session_state: st.session_state.page = "🌐 TERMINAL"
 nav = st.columns(5)
 pages = ["🌐 TERMINAL", "🧠 AI REPORT", "📊 ANALYTICS", "📖 JOURNAL", "🧪 BACKTEST"]
-if 'page' not in st.session_state: st.session_state.page = "🌐 TERMINAL"
 
-for i, p_name in enumerate(pages):
-    if nav[i].button(p_name, use_container_width=True):
-        st.session_state.page = p_name
+for i, p in enumerate(pages):
+    if nav[i].button(p, use_container_width=True):
+        st.session_state.page = p
 
-# --- 4. TERMINAL PAGE (LAYOUT LOCKED) ---
+# --- 4. PAGE: TERMINAL (CHART + DRAWING TOOLS + ORDER TYPE) ---
 if st.session_state.page == "🌐 TERMINAL":
-    # Symbol Input & Chart size locked to previous version
-    sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
-    chart_url = f"https://s.tradingview.com/widgetembed/?symbol={sym}&interval=1&theme=dark"
-    st.components.v1.iframe(chart_url, height=650) # Strict Height Lock
-
-    # Execution Section (Reference: Screenshot_20260427_110945_2.jpg)
-    st.markdown("### ⚡ Execution")
-    c1, c2, c3 = st.columns(3)
-    side = c1.selectbox("Side", ["BUY", "SELL"])
-    qty = c2.number_input("Qty", value=0.01, step=0.01)
-    entry = c3.number_input("Entry Price", value=0.0)
-
-    if st.button("EXECUTE & OPEN", use_container_width=True):
-        new_row = {"Date": datetime.now().strftime("%Y-%m-%d"), "Symbol": sym, "Side": side, 
-                   "Qty": qty, "Entry": entry, "PnL": 0, "Status": "OPEN", "Discipline": 80, "Risk": 70}
-        st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
-        st.session_state.df.to_csv(DATA_FILE, index=False)
-        st.success("Trade Logged in Global Trading Book!")
-
-# --- 5. AI REPORT (Reference: Screenshot_20260430_150044.jpg) ---
-elif st.session_state.page == "🧠 AI REPORT":
-    st.subheader("TradinJournal AI: Behavioral Analysis")
-    # Score metrics simulation
-    scores = {"Discipline": 21, "Risk Management": 11, "Consistency": 43, "Entry Quality": 67}
+    col_chart, col_order = st.columns([3.5, 1])
     
-    for label, val in scores.items():
-        st.write(f"{label}: {val}%")
-        color = "#ff4b2b" if val < 30 else "#00ffca"
-        st.markdown(f"""<div class="p-bar-bg"><div class="p-bar-fill" style="width: {val}%; background: {color};"></div></div>""", unsafe_allow_html=True)
-    st.info("AI Tip: Stop-Loss discipline is low. Improve your Risk Management score.")
+    with col_chart:
+        sym = st.text_input("Symbol", value="BTCUSDT", label_visibility="collapsed").upper()
+        # Advanced TradingView Widget with Side Toolbar Locked
+        chart_html = f"""
+        <div style="height:650px;">
+          <div id="tv_chart" style="height:650px;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "autosize": true, "symbol": "BINANCE:{sym}", "interval": "1",
+            "theme": "dark", "style": "1", "hide_side_toolbar": false,
+            "allow_symbol_change": true, "container_id": "tv_chart"
+          }});
+          </script>
+        </div>"""
+        components.html(chart_html, height=650)
 
-# --- 6. ANALYTICS & JOURNAL (Reference: Screenshot_20260430_145444.jpg) ---
-elif st.session_state.page == "📊 ANALYTICS":
-    st.subheader("Performance Analytics")
-    if not st.session_state.df.empty:
-        fig = px.bar(st.session_state.df, x="Date", y="PnL", color="PnL", title="PnL Distribution")
-        st.plotly_chart(fig, use_container_width=True)
+    with col_order:
+        st.markdown("### ⚡ Execution")
+        o_side = st.selectbox("Side", ["BUY", "SELL"])
+        o_type = st.selectbox("Order Type", ["Market", "Limit", "SL", "TP"]) # Order Type Locked
+        o_qty = st.number_input("Qty", value=0.01, step=0.01)
+        o_ent = st.number_input("Entry", value=0.0)
+        
+        if st.button("EXECUTE TRADE", use_container_width=True):
+            new_t = [datetime.now().strftime("%y-%m-%d"), sym, o_side, o_type, o_qty, o_ent, 0, 0, "OPEN"]
+            pd.DataFrame([new_t]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+            st.toast("Trade Logged in Terminal!")
+
+# --- 5. PAGE: BACKTEST (MANUAL ENTRY & ANALYTICS LOCKED) ---
+elif st.session_state.page == "🧪 BACKTEST":
+    st.subheader("Strategy Backtest Engine")
+    
+    # Form for Manual Entry (Fix for Screenshot_20260501_092354.jpg)
+    with st.expander("➕ Add Manual Backtest Record", expanded=True):
+        with st.form("bt_form"):
+            bc1, bc2, bc3 = st.columns(3)
+            b_sym = bc1.text_input("Symbol", "BTCUSDT")
+            b_side = bc2.selectbox("Side", ["BUY", "SELL"])
+            b_qty = bc3.number_input("Qty", 1.0)
+            
+            bc4, bc5 = st.columns(2)
+            b_en = bc4.number_input("Entry Price")
+            b_ex = bc5.number_input("Exit Price")
+            
+            if st.form_submit_button("Save & Lock to Backtest"):
+                pnl = (b_ex - b_en) * b_qty if b_side == "BUY" else (b_en - b_ex) * b_qty
+                new_bt = [datetime.now().strftime("%y-%m-%d"), b_sym, b_side, "Backtest", b_qty, b_en, b_ex, pnl, "CLOSED"]
+                pd.DataFrame([new_bt]).to_csv(DATA_FILE, mode='a', header=False, index=False)
+                st.success("Data added to Backtest Log!")
+                st.rerun()
+
+    # Backtest Metrics & Visuals
+    df = get_data()
+    if not df.empty:
+        st.markdown("---")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Net Profit", f"₹{df['PnL'].sum():,.2f}")
+        m2.metric("Win Rate", f"{(len(df[df['PnL']>0])/len(df)*100):.1f}%" if len(df)>0 else "0%")
+        m3.metric("Total Trades", len(df))
+        
+        st.markdown("#### 📈 Equity Growth")
+        st.line_chart(df['PnL'].cumsum(), color="#6a11cb")
     else:
-        st.warning("No data available to analyze.")
+        st.info("No data found. Manual entries added here will show up in the report.")
 
+# --- 6. PAGE: JOURNAL ---
 elif st.session_state.page == "📖 JOURNAL":
-    st.subheader("Trade Journal")
-    st.dataframe(st.session_state.df, use_container_width=True)
+    st.subheader("Master Trade Journal")
+    st.dataframe(get_data().iloc[::-1], use_container_width=True)
